@@ -1,25 +1,22 @@
 import pandas as pd
 import numpy as np
-from sklearn.model_selection import train_test_split, GridSearchCV
+from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.impute import SimpleImputer
 from sklearn.preprocessing import StandardScaler, OneHotEncoder
 from sklearn.compose import ColumnTransformer
 from sklearn.decomposition import PCA
 from sklearn.linear_model import LogisticRegression
-from sklearn.neighbors import KNeighborsClassifier
 from imblearn.pipeline import Pipeline as ImbPipeline
 from imblearn.over_sampling import SMOTE
 from sklearn.metrics import classification_report
 import joblib
 
-print("Chargement des données...")
+# Chargement des données
 df = pd.read_csv("C:/Users/HP/Desktop/CHD_ streamlit_App/CHD.csv", sep=";")
-
-# Nettoyage rapide
 df["famhist"] = df["famhist"].str.strip().str.lower()
 
-# Séparer X et y
+# Séparation X/y
 X = df.drop("chd", axis=1)
 y = df["chd"]
 
@@ -43,17 +40,12 @@ preprocessor = ColumnTransformer([
     ("cat", categorical_pipeline, categorical_cols)
 ])
 
-# Séparer train/test
+# Train/test split
 X_train, X_test, y_train, y_test = train_test_split(
     X, y, test_size=0.33, random_state=123, stratify=y
 )
 
-# -----------------------------
-#  Logistic Regression avec PCA
-# -----------------------------
-print("Entraînement Logistic Regression avec PCA...")
-
-# Déterminer le nombre de composantes pour 90% de variance
+# Déterminer le nombre de composantes pour 90% variance
 pca_tmp = Pipeline([
     ("preprocessor", preprocessor),
     ("pca", PCA()),
@@ -64,61 +56,29 @@ cumsum = np.cumsum(pca_tmp.named_steps["pca"].explained_variance_ratio_)
 n_components = np.argmax(cumsum >= 0.9) + 1
 print("Composantes nécessaires pour 90% variance :", n_components)
 
-pipeline_lr_pca = Pipeline([
-    ("preprocessor", preprocessor),
-    ("pca", PCA(n_components=n_components)),
-    ("model", LogisticRegression(max_iter=500))
-])
-pipeline_lr_pca.fit(X_train, y_train)
-y_pred = pipeline_lr_pca.predict(X_test)
-print("Résultats Logistic Regression avec PCA :")
-print(classification_report(y_test, y_pred))
-
-# -----------------------------
-#  Logistic Regression sans PCA
-# -----------------------------
-print("Entraînement Logistic Regression sans PCA...")
-pipeline_lr_no_pca = Pipeline([
-    ("preprocessor", preprocessor),
-    ("model", LogisticRegression(max_iter=500))
-])
-pipeline_lr_no_pca.fit(X_train, y_train)
-y_pred_no_pca = pipeline_lr_no_pca.predict(X_test)
-print("Résultats Logistic Regression sans PCA :")
-print(classification_report(y_test, y_pred_no_pca))
-
-# -----------------------------
-#  KNN avec SMOTE et GridSearch
-# -----------------------------
-print("Entraînement KNN avec SMOTE (rapide pour test)...")
-
-pipeline_knn = ImbPipeline([
+# Logistic Regression avec SMOTE et PCA
+pipeline_lr_smote = ImbPipeline([
     ("preprocessor", preprocessor),
     ("smote", SMOTE(random_state=123)),
-    ("pca", PCA(n_components=min(n_components, 5))),  # limite les composants pour accélérer
-    ("knn", KNeighborsClassifier())
+    ("pca", PCA(n_components=n_components)),
+    ("model", LogisticRegression(max_iter=500, class_weight="balanced", random_state=123))
 ])
 
-params = {"knn__n_neighbors": [3, 5]}  # moins de valeurs pour tester rapidement
+pipeline_lr_smote.fit(X_train, y_train)
 
-grid = GridSearchCV(
-    pipeline_knn,
-    param_grid=params,
-    cv=3,       # cross-validation plus rapide
-    scoring="f1",
-    n_jobs=-1   # utilise tous les cœurs CPU
-)
+# Prédictions
+y_pred = pipeline_lr_smote.predict(X_test)
+y_pred_proba = pipeline_lr_smote.predict_proba(X_test)[:, 1]
 
-grid.fit(X_train, y_train)
-y_pred_knn = grid.predict(X_test)
-print("Résultats KNN avec SMOTE :")
-print(classification_report(y_test, y_pred_knn))
+print("Classification report :")
+print(classification_report(y_test, y_pred))
 
-# -----------------------------
-#  Sauvegarde du meilleur modèle
-# -----------------------------
-print("Sélection et sauvegarde du meilleur modèle...")
-best_model = grid.best_estimator_
-best_model.fit(X, y)  # entraînement final sur tout le dataset
-joblib.dump(best_model, "Model.pkl")
-print("Modèle sauvegardé dans Model.pkl ")
+# Afficher quelques probabilités
+print("Exemple de probabilités :")
+print(y_pred_proba[:10])
+
+# Sauvegarde du modèle
+pipeline_lr_smote.fit(X, y)  # entraînement final sur tout le dataset
+joblib.dump(pipeline_lr_smote, "Model.pkl")
+print("Modèle sauvegardé dans Model.pkl")
+
